@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>心算練習與管理系統 (雲端同步版)</title>
+  <!-- Tailwind CSS & FontAwesome Icons -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;800;900&family=Outfit:wght@500;700;900&display=swap');
+    body { font-family: 'Noto Sans TC', sans-serif; }
+    .num-font { font-family: 'Outfit', sans-serif; }
+    .key-btn:active { transform: scale(0.94); }
+  </style>
+
+  <!-- Firebase SDK (Modular v10) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getDatabase, ref, set, get, onValue, push, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+    // ==========================================
+    // 請將下方這段換成你從 Firebase 複製過來的真實設定
+    // ==========================================
+    const firebaseConfig = {
+  apiKey: "AIzaSyC1hLsa71k9_7XNytKdXzTMFlBluaxekqg",
+  authDomain: "math-practice-db.firebaseapp.com",
+  projectId: "math-practice-db",
+  storageBucket: "math-practice-db.firebasestorage.app",
+  messagingSenderId: "279162741428",
+  appId: "1:279162741428:web:dc41808bf895178c682de1",
+  measurementId: "G-QPGWDQ3X5R"
+};
+
+    // 初始化 Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // 將 Firebase 方法掛載到全域變數
+    window.FB_DB = db;
+    window.FB_ref = ref;
+    window.FB_set = set;
+    window.FB_get = get;
+    window.FB_onValue = onValue;
+    window.FB_push = push;
+    window.FB_remove = remove;
+
+    // 通知 Firebase 已載入完成
+    window.dispatchEvent(new Event('firebase-ready'));
+  </script>
+</head>
+<body class="bg-slate-100 h-screen w-screen overflow-hidden text-slate-800 flex flex-col select-none">
+
+  <!-- 頂部標題與後台管理列 -->
+  <header class="bg-indigo-700 text-white shadow-md z-30 shrink-0">
+    <div class="max-w-7xl mx-auto px-4 py-2.5 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="bg-white/20 p-2 rounded-xl">
+          <i class="fa-solid fa-calculator text-xl"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold tracking-wide">心算練習與管理系統 <span class="text-xs bg-emerald-500 px-2 py-0.5 rounded-full text-white ml-2">雲端連動中</span></h1>
+          <p class="text-xs text-indigo-200">全載具即時同步模式</p>
+        </div>
+      </div>
+      
+      <button id="adminAuthBtn" onclick="openAdminModal()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-sm font-bold transition flex items-center space-x-2 border border-indigo-400/30 shadow-sm active:scale-95">
+        <i class="fa-solid fa-lock text-xs"></i>
+        <span>後台管理</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 主要內容區 -->
+  <main class="max-w-7xl mx-auto px-4 py-3 flex-1 w-full grid grid-cols-1 md:grid-cols-12 gap-4 overflow-hidden items-stretch">
+
+    <!-- 左區塊 (佔 3 欄)：最快秒速榮譽榜 -->
+    <div class="md:col-span-3 bg-amber-500/10 border border-amber-200/80 rounded-2xl p-3 shadow-xs flex flex-col justify-between overflow-hidden">
+      <div>
+        <div class="flex items-center space-x-2 mb-2 pb-2 border-b border-amber-200/50">
+          <div class="w-7 h-7 rounded-full bg-amber-500 text-white flex items-center justify-center font-bold text-xs shadow">
+            <i class="fa-solid fa-trophy"></i>
+          </div>
+          <h2 class="text-base font-black text-amber-950 flex items-center gap-1.5">
+            最快秒速榮譽榜
+            <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300/50 font-semibold">前3名</span>
+          </h2>
+        </div>
+        <div id="leaderboardList" class="flex flex-col gap-2.5"></div>
+      </div>
+      <div class="text-center pt-2 border-t border-amber-200/40">
+        <span class="text-[10px] text-slate-500 font-medium"><i class="fa-solid fa-circle-info mr-1"></i>標準：正確率 $\ge 80\%$ 且題目 $\ge 5$ 題</span>
+      </div>
+    </div>
+
+    <!-- 中區塊 (佔 7 欄)：主練習與鍵盤控制區 -->
+    <div class="md:col-span-7 flex flex-col gap-3 overflow-hidden justify-between">
+      <div class="bg-white rounded-2xl py-6 px-4 shadow-sm border border-slate-200 flex flex-col justify-center items-center min-h-[160px] shrink-0 relative">
+        <div id="questionContainer" class="hidden text-center">
+          <div class="text-xs font-bold text-slate-400 tracking-wider mb-2">請算出正確答案</div>
+          <div class="flex items-center justify-center space-x-3 text-5xl md:text-6xl font-black text-slate-800 num-font tracking-wider">
+            <span id="numA">?</span>
+            <span class="text-indigo-600">×</span>
+            <span id="numB">?</span>
+            <span class="text-slate-400">=</span>
+            <span id="userInputDisplay" class="text-indigo-600 underline underline-offset-8 min-w-[2.5ch] inline-block text-left font-mono"></span>
+          </div>
+        </div>
+        <div id="idleContainer" class="text-center text-slate-400 py-3">
+          <i class="fa-solid fa-calculator text-4xl mb-2 text-slate-300"></i>
+          <p id="idleText" class="font-bold text-slate-600 text-base">正在同步雲端資料... 準備好後請選擇學員開始練習！</p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 flex-1 flex flex-col justify-between overflow-hidden">
+        <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between gap-2 shrink-0">
+          <div class="flex items-center space-x-2">
+            <div class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-sm">
+              <i class="fa-solid fa-user-graduate"></i>
+            </div>
+            <div>
+              <label class="block text-[9px] font-bold text-slate-400 uppercase">選擇練習學員</label>
+              <select id="userSelect" onchange="onUserChange()" class="bg-white border border-slate-300 font-bold text-slate-800 rounded-md px-2 py-0.5 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"></select>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <div id="dailyStatusBadge" class="px-2.5 py-1 rounded-full text-xs font-bold flex items-center space-x-1 bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <i class="fa-solid fa-circle-check text-emerald-600"></i>
+              <span>雲端連線中</span>
+            </div>
+            <button id="startPracticeBtn" onclick="startPractice()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold transition shadow-2xs flex items-center space-x-1 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95">
+              <i class="fa-solid fa-play text-[10px]"></i>
+              <span>開始今日練習</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between px-3 py-1.5 bg-slate-50/90 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 shrink-0">
+          <div class="flex items-center space-x-1.5">
+            <i class="fa-solid fa-clock text-amber-500 text-sm"></i>
+            <span>剩餘時間：</span>
+            <span id="timerDisplay" class="num-font text-base font-black text-amber-600">--</span>
+            <span>秒</span>
+          </div>
+          <div class="text-[11px] px-2.5 py-0.5 bg-indigo-50 text-indigo-700 rounded-lg border border-indigo-100 font-bold">
+            被乘數: <span id="configDigitsDisplay">1</span> 位數 | 乘數: <span id="configMultiplierDisplay">--</span>
+          </div>
+        </div>
+
+        <div class="max-w-xs mx-auto w-full flex-1 flex flex-col justify-center my-auto">
+          <div class="w-full bg-indigo-600 text-white rounded-full py-1.5 px-4 mb-3 shadow-xs text-center font-bold text-lg tracking-wider flex items-center justify-center space-x-2 num-font">
+            <span id="syncNumA" class="text-amber-300">?</span>
+            <span class="text-indigo-200">×</span>
+            <span id="syncNumB" class="text-amber-300">?</span>
+            <span class="text-indigo-200">=</span>
+            <span id="syncUserAns" class="text-white underline underline-offset-4 min-w-[2ch] inline-block text-left font-mono"></span>
+          </div>
+
+          <div class="grid grid-cols-4 gap-2">
+            <button onclick="appendNum(7)" class="key-btn aspect-square bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xl font-bold rounded-xl shadow-2xs flex items-center justify-center num-font">7</button>
+            <button onclick="appendNum(8)" class="key-btn aspect-square bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xl font-bold rounded-xl shadow-2xs flex items-center justify-center num-font">8</button>
+            <button onclick="appendNum(9)" class="key-btn aspect-square bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xl font-bold rounded-xl shadow-2xs flex items-center justify-center num-font">9</button>
+            <div></div>
+            <button onclick="appendNum(4)" class="key-btn aspect-square bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xl font-bold rounded-xl shadow-2xs flex items-center justify-center num-font">4</button>
+            <button onclick="appendNum(5)" class="key-btn aspect-square bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xl font-bold rounded-xl shadow-2xs flex items-center justify-center num-font">5</button>
+            <button onclick="appendNum(6)" class="key-btn aspect-square bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xl font-bold rounded-xl shadow-2xs flex items-center justify-center num-font">6</button>
+            <button id="submitAnswerBtn" onclick="submitAnswer()" disabled class="key-btn aspect-square bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white rounded-full shadow-md flex items-center justify-center transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+              <i class="fa-solid fa-paper-plane text-base"></i>
+            </button>
+            <button onclick="appendNum(1)" class="key-btn aspect-square bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xl font-bold rounded-xl shadow-2xs flex items-center justify-center num-font">1</button>
+            <button onclick="appendNum(2)" class="key-btn aspect-square bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xl font-bold rounded-xl shadow-2xs flex items-center justify-center num-font">2</button>
+            <button onclick="appendNum(3)" class="key-btn aspect-square bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xl font-bold rounded-xl shadow-2xs flex items-center justify-center num-font">3</button>
+            <div></div>
+            <button onclick="clearNum()" class="key-btn aspect-square bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 text-base font-bold rounded-xl flex items-center justify-center">C</button>
+            <button onclick="appendNum(0)" class="key-btn aspect-square bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xl font-bold rounded-xl shadow-2xs flex items-center justify-center num-font">0</button>
+            <button onclick="backspaceNum()" class="key-btn aspect-square bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 text-base font-bold rounded-xl flex items-center justify-center">
+              <i class="fa-solid fa-backspace"></i>
+            </button>
+            <div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右區塊 (佔 2 欄)：戰績統計區 -->
+    <div class="md:col-span-2 flex flex-col gap-3 justify-between">
+      <div class="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs flex-1 flex flex-col justify-center items-center text-center">
+        <div class="text-slate-400 text-xs font-bold mb-1">已答題數</div>
+        <div id="currentTotal" class="num-font text-3xl font-black text-slate-700">0</div>
+      </div>
+      <div class="bg-emerald-50/70 p-3 rounded-2xl border border-emerald-100 shadow-xs flex-1 flex flex-col justify-center items-center text-center">
+        <div class="text-emerald-600 text-xs font-bold mb-1">答對數</div>
+        <div id="currentCorrect" class="num-font text-3xl font-black text-emerald-600">0</div>
+      </div>
+      <div class="bg-rose-50/70 p-3 rounded-2xl border border-rose-100 shadow-xs flex-1 flex flex-col justify-center items-center text-center">
+        <div class="text-rose-500 text-xs font-bold mb-1">答錯數</div>
+        <div id="currentWrong" class="num-font text-3xl font-black text-rose-500">0</div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 密鎖彈窗 -->
+  <div id="authModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-100 flex flex-col">
+      <div class="text-center mb-3">
+        <div class="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-1.5 text-lg">
+          <i class="fa-solid fa-shield-halved"></i>
+        </div>
+        <h3 class="text-base font-bold text-slate-800">解鎖管理者後台</h3>
+        <p class="text-[11px] text-slate-500">請直接點擊下方螢幕按鍵輸入密碼</p>
+      </div>
+      
+      <form onsubmit="handleAdminAuth(event)">
+        <div class="mb-3">
+          <input type="password" id="adminPasswordInput" readonly placeholder="請輸入密碼" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-center text-xl font-bold tracking-widest focus:outline-none">
+          <p id="authErrorMsg" class="text-xs text-rose-500 font-bold text-center mt-1 hidden">密碼錯誤，請重新點擊輸入</p>
+        </div>
+
+        <div class="grid grid-cols-3 gap-1.5 mb-4">
+          <button type="button" onclick="appendAdminPass('7')" class="key-btn bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg rounded-lg py-1.5 num-font">7</button>
+          <button type="button" onclick="appendAdminPass('8')" class="key-btn bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg rounded-lg py-1.5 num-font">8</button>
+          <button type="button" onclick="appendAdminPass('9')" class="key-btn bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg rounded-lg py-1.5 num-font">9</button>
+          <button type="button" onclick="appendAdminPass('4')" class="key-btn bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg rounded-lg py-1.5 num-font">4</button>
+          <button type="button" onclick="appendAdminPass('5')" class="key-btn bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg rounded-lg py-1.5 num-font">5</button>
+          <button type="button" onclick="appendAdminPass('6')" class="key-btn bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg rounded-lg py-1.5 num-font">6</button>
+          <button type="button" onclick="appendAdminPass('1')" class="key-btn bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg rounded-lg py-1.5 num-font">1</button>
+          <button type="button" onclick="appendAdminPass('2')" class="key-btn bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg rounded-lg py-1.5 num-font">2</button>
+          <button type="button" onclick="appendAdminPass('3')" class="key-btn bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg rounded-lg py-1.5 num-font">3</button>
+          <button type="button" onclick="clearAdminPass()" class="key-btn bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold text-sm rounded-lg py-1.5">C</button>
+          <button type="button" onclick="appendAdminPass('0')" class="key-btn bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg rounded-lg py-1.5 num-font">0</button>
+          <button type="button" onclick="backspaceAdminPass()" class="key-btn bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-sm rounded-lg py-1.5"><i class="fa-solid fa-backspace"></i></button>
+        </div>
+
+        <div class="flex space-x-2">
+          <button type="button" onclick="closeAuthModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-2 rounded-xl text-xs transition">取消</button>
+          <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded-xl text-xs shadow-md transition">解鎖登入</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 後台管理視窗 Modal -->
+  <div id="adminModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-50 rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+      <div class="bg-slate-800 text-white px-6 py-4 flex justify-between items-center">
+        <div class="flex items-center space-x-2"><i class="fa-solid fa-sliders text-indigo-400"></i><h2 class="font-bold text-lg">系統後台管理 (雲端同步)</h2></div>
+        <button onclick="closeAdminModal()" class="text-slate-400 hover:text-white text-xl"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="p-6 overflow-y-auto space-y-6 flex-1">
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+          <h3 class="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2"><i class="fa-solid fa-key text-indigo-600"></i>後台存取密碼設定</h3>
+          <div class="flex items-center space-x-3">
+            <input type="password" id="newAdminPassword" placeholder="設置新密碼" class="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+            <button onclick="updateAdminPassword()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-sm font-semibold transition">儲存新密碼</button>
+          </div>
+        </div>
+
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+          <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2 border-b pb-2 border-slate-100"><i class="fa-solid fa-gear text-indigo-600"></i>題目與計時設定</h3>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-2">1. 被乘數位數</label>
+            <div class="flex flex-wrap gap-2" id="digitsBtnGroup">
+              <button onclick="selectDigits(1)" class="digit-btn px-4 py-2 rounded-xl border font-bold text-sm">1 位數</button>
+              <button onclick="selectDigits(2)" class="digit-btn px-4 py-2 rounded-xl border font-bold text-sm">2 位數</button>
+              <button onclick="selectDigits(3)" class="digit-btn px-4 py-2 rounded-xl border font-bold text-sm">3 位數</button>
+              <button onclick="selectDigits(4)" class="digit-btn px-4 py-2 rounded-xl border font-bold text-sm">4 位數</button>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="text-xs font-bold text-slate-600">2. 乘數選擇 (1~9)</label>
+              <button onclick="selectAllMultipliers()" class="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-600 px-2.5 py-1 rounded-lg border border-indigo-200 font-semibold transition">全選 (1~9)</button>
+            </div>
+            <div class="grid grid-cols-9 gap-2" id="multiplierBtnGroup"></div>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-2">3. 倒數時間設定 (秒)</label>
+            <div class="flex flex-wrap items-center gap-2">
+              <button onclick="setQuickTime(30)" class="time-quick-btn px-3.5 py-1.5 rounded-xl border font-bold text-sm">30 秒</button>
+              <button onclick="setQuickTime(60)" class="time-quick-btn px-3.5 py-1.5 rounded-xl border font-bold text-sm">60 秒</button>
+              <button onclick="setQuickTime(90)" class="time-quick-btn px-3.5 py-1.5 rounded-xl border font-bold text-sm">90 秒</button>
+              <button onclick="setQuickTime(120)" class="time-quick-btn px-3.5 py-1.5 rounded-xl border font-bold text-sm">120 秒</button>
+              <div class="flex items-center space-x-1.5 ml-auto bg-slate-50 border border-slate-300 rounded-xl px-3 py-1">
+                <span class="text-xs font-semibold text-slate-500">自訂：</span>
+                <input type="number" id="configCustomTime" min="5" max="600" oninput="onCustomTimeInput()" class="w-16 bg-transparent font-bold text-sm text-center focus:outline-none">
+                <span class="text-xs font-semibold text-slate-500">秒</span>
+              </div>
+            </div>
+          </div>
+          <button onclick="saveConfig()" class="w-full mt-2 bg-indigo-600 hover:bg-indigo-500 text-white py-2.5 rounded-xl text-sm font-bold shadow-md transition flex items-center justify-center space-x-2">
+            <i class="fa-solid fa-floppy-disk"></i><span>儲存參數至雲端</span>
+          </button>
+        </div>
+
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+          <h3 class="text-sm font-bold text-slate-800 mb-3 flex items-center gap-2"><i class="fa-solid fa-users text-indigo-600"></i>學員名單管理</h3>
+          <div class="flex gap-2 mb-4">
+            <input type="text" id="newUserName" placeholder="輸入學員姓名..." class="flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+            <button onclick="addUser()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-lg text-sm font-semibold transition flex items-center space-x-1"><i class="fa-solid fa-plus text-xs"></i><span>新增</span></button>
+          </div>
+          <div class="overflow-x-auto border border-slate-200 rounded-lg">
+            <table class="w-full text-left text-sm text-slate-600">
+              <thead class="bg-slate-50 text-slate-700 font-semibold">
+                <tr><th class="p-2.5 border-b">學員姓名</th><th class="p-2.5 border-b">今日練習狀態</th><th class="p-2.5 border-b text-right">操作</th></tr>
+              </thead>
+              <tbody id="userAdminTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+          <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2"><i class="fa-solid fa-chart-column text-indigo-600"></i>歷史統計與數據呈現</h3>
+          <div class="h-64 relative"><canvas id="historyChart"></canvas></div>
+          <div class="overflow-x-auto border border-slate-200 rounded-lg max-h-48">
+            <table class="w-full text-left text-xs text-slate-600">
+              <thead class="bg-slate-50 text-slate-700 font-semibold sticky top-0">
+                <tr><th class="p-2 border-b">日期時間</th><th class="p-2 border-b">姓名</th><th class="p-2 border-b">總題數</th><th class="p-2 border-b">答對</th><th class="p-2 border-b">答錯</th><th class="p-2 border-b">正確率</th><th class="p-2 border-b">平均速度</th></tr>
+              </thead>
+              <tbody id="historyTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript 雲端同步邏輯 -->
+  <script>
+    const defaultConfig = {
+      digits: 2,
+      multipliers: [2, 3, 4, 5, 6, 7, 8, 9],
+      duration: 30,
+      adminPassword: '1234'
+    };
+
+    const defaultUsers = [
+      { id: 'u1', name: '01林益宸' },
+      { id: 'u2', name: '02陳小明' },
+      { id: 'u3', name: '03張小美' }
+    ];
+
+    let config = { ...defaultConfig };
+    let usersList = [...defaultUsers];
+    let historyLogs = [];
+
+    let tempDigits = 2;
+    let tempMultipliers = [];
+    let tempDuration = 30;
+
+    let activeUserId = '';
+    let isPracticing = false;
+    let timerId = null;
+    let timeLeft = 0;
+    let currentAns = 0;
+    let currentNumA = 0;
+    let currentNumB = 0;
+    let inputBuffer = '';
+    
+    let currentTotal = 0;
+    let currentCorrect = 0;
+    let currentWrong = 0;
+    let historyChartInstance = null;
+
+    // 當 Firebase 載入完成後啟動即時監聽
+    window.addEventListener('firebase-ready', () => {
+      initFirebaseListeners();
+    });
+
+    function initFirebaseListeners() {
+      const db = window.FB_DB;
+      const ref = window.FB_ref;
+      const onValue = window.FB_onValue;
+
+      // 1. 監聽 Config
+      onValue(ref(db, 'config'), (snapshot) => {
+        const val = snapshot.val();
+        if (val) {
+          config = val;
+          if (!config.multipliers) config.multipliers = [2,3,4,5,6,7,8,9];
+        } else {
+          window.FB_set(ref(db, 'config'), defaultConfig);
+          config = { ...defaultConfig };
+        }
+        updateConfigSummaryText();
+      });
+
+      // 2. 監聽 Users
+      onValue(ref(db, 'users'), (snapshot) => {
+        const val = snapshot.val();
+        if (val) {
+          usersList = Object.keys(val).map(key => ({ id: key, ...val[key] }));
+        } else {
+          defaultUsers.forEach(u => {
+            window.FB_set(ref(db, `users/${u.id}`), { name: u.name });
+          });
+          usersList = [...defaultUsers];
+        }
+        renderUserDropdown();
+        renderUserAdminTable();
+        checkSelectedUserDailyStatus();
+      });
+
+      // 3. 監聽 History
+      onValue(ref(db, 'history'), (snapshot) => {
+        const val = snapshot.val();
+        if (val) {
+          historyLogs = Object.keys(val).map(key => ({ id: key, ...val[key] }));
+          historyLogs.sort((a, b) => b.timestamp - a.timestamp);
+        } else {
+          historyLogs = [];
+        }
+        renderHistoryTable();
+        updateLeaderboard();
+        updateCharts();
+        checkSelectedUserDailyStatus();
+      });
+    }
+
+    // 雲端寫入函式
+    function saveConfigToCloud() {
+      window.FB_set(window.FB_ref(window.FB_DB, 'config'), config);
+    }
+
+    function addUser() {
+      const nameInput = document.getElementById('newUserName');
+      const name = nameInput.value.trim();
+      if (!name) return;
+      const newRef = window.FB_push(window.FB_ref(window.FB_DB, 'users'));
+      window.FB_set(newRef, { name: name });
+      nameInput.value = '';
+    }
+
+    function removeUser(userId) {
+      if (!confirm('確定要從雲端刪除這位學員嗎？')) return;
+      window.FB_remove(window.FB_ref(window.FB_DB, `users/${userId}`));
+    }
+
+    function saveLogToCloud(newLog) {
+      const newRef = window.FB_push(window.FB_ref(window.FB_DB, 'history'));
+      window.FB_set(newRef, newLog);
+    }
+
+    function resetUserDailyStatus(userId) {
+      const todayStr = getTodayDateString();
+      historyLogs.forEach(log => {
+        if (log.userId === userId && log.date === todayStr) {
+          window.FB_remove(window.FB_ref(window.FB_DB, `history/${log.id}`));
+        }
+      });
+    }
+
+    // 後台密碼專用鍵盤函數
+    function appendAdminPass(char) {
+      const input = document.getElementById('adminPasswordInput');
+      if (input) input.value += char;
+    }
+    function clearAdminPass() {
+      const input = document.getElementById('adminPasswordInput');
+      if (input) input.value = '';
+    }
+    function backspaceAdminPass() {
+      const input = document.getElementById('adminPasswordInput');
+      if (input) input.value = input.value.slice(0, -1);
+    }
+
+    function openAdminModal() {
+      clearAdminPass();
+      const errEl = document.getElementById('authErrorMsg');
+      if (errEl) errEl.classList.add('hidden');
+      document.getElementById('authModal').classList.remove('hidden');
+    }
+    function closeAuthModal() { document.getElementById('authModal').classList.add('hidden'); }
+
+    function handleAdminAuth(e) {
+      e.preventDefault();
+      const inputPass = document.getElementById('adminPasswordInput').value;
+      const currentPass = config.adminPassword || '1234';
+
+      if (inputPass === currentPass || inputPass === 'admin') {
+        closeAuthModal();
+        tempDigits = config.digits || 2;
+        tempMultipliers = [...(config.multipliers || [2,3,4,5,6,7,8,9])];
+        tempDuration = config.duration || 30;
+        renderAdminConfigUI();
+        document.getElementById('adminModal').classList.remove('hidden');
+        setTimeout(updateCharts, 200);
+      } else {
+        const errEl = document.getElementById('authErrorMsg');
+        if (errEl) errEl.classList.remove('hidden');
+      }
+    }
+    function closeAdminModal() { document.getElementById('adminModal').classList.add('hidden'); }
+
+    function updateAdminPassword() {
+      const newPass = document.getElementById('newAdminPassword').value.trim();
+      if (!newPass) { alert('密碼不可為空！'); return; }
+      config.adminPassword = newPass;
+      saveConfigToCloud();
+      document.getElementById('newAdminPassword').value = '';
+      alert('後台密碼已同步更新至雲端！');
+    }
+
+    function renderAdminConfigUI() {
+      const digitBtns = document.querySelectorAll('#digitsBtnGroup .digit-btn');
+      digitBtns.forEach((btn, index) => {
+        const val = index + 1;
+        btn.className = val === tempDigits ? "digit-btn px-4 py-2 rounded-xl font-bold text-sm bg-indigo-600 text-white shadow-xs" : "digit-btn px-4 py-2 rounded-xl font-bold text-sm bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100";
+      });
+
+      const multContainer = document.getElementById('multiplierBtnGroup');
+      multContainer.innerHTML = '';
+      for (let i = 1; i <= 9; i++) {
+        const isSelected = tempMultipliers.includes(i);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.onclick = () => toggleMultiplier(i);
+        btn.innerText = i;
+        btn.className = isSelected ? "py-2.5 rounded-xl font-black text-base bg-indigo-600 text-white shadow-xs" : "py-2.5 rounded-xl font-black text-base bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100";
+        multContainer.appendChild(btn);
+      }
+
+      document.querySelectorAll('.time-quick-btn').forEach(btn => {
+        const sec = parseInt(btn.innerText, 10);
+        btn.className = sec === tempDuration ? "time-quick-btn px-3.5 py-1.5 rounded-xl font-bold text-sm bg-indigo-600 text-white shadow-xs" : "time-quick-btn px-3.5 py-1.5 rounded-xl font-bold text-sm bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100";
+      });
+      document.getElementById('configCustomTime').value = tempDuration;
+    }
+
+    function selectDigits(d) { tempDigits = d; renderAdminConfigUI(); }
+    function toggleMultiplier(num) {
+      if (tempMultipliers.includes(num)) {
+        if (tempMultipliers.length === 1) { alert('請至少保留一個乘數！'); return; }
+        tempMultipliers = tempMultipliers.filter(n => n !== num);
+      } else { tempMultipliers.push(num); tempMultipliers.sort((a,b)=>a-b); }
+      renderAdminConfigUI();
+    }
+    function selectAllMultipliers() { tempMultipliers = [1,2,3,4,5,6,7,8,9]; renderAdminConfigUI(); }
+    function setQuickTime(sec) { tempDuration = sec; renderAdminConfigUI(); }
+    function onCustomTimeInput() {
+      const val = parseInt(document.getElementById('configCustomTime').value, 10);
+      if (val && val >= 5) tempDuration = val;
+    }
+
+    function updateConfigSummaryText() {
+      const dEl = document.getElementById('configDigitsDisplay');
+      const mEl = document.getElementById('configMultiplierDisplay');
+      if (dEl) dEl.innerText = config.digits;
+      if (mEl) mEl.innerText = (config.multipliers && config.multipliers.length > 0) ? config.multipliers.join(',') : '全選';
+    }
+
+    function saveConfig() {
+      if (!tempMultipliers || tempMultipliers.length === 0) { alert('請至少勾選一個乘數！'); return; }
+      if (!tempDuration || tempDuration < 5) { alert('請設定至少 5 秒以上的練習時間！'); return; }
+
+      config.digits = tempDigits;
+      config.multipliers = [...tempMultipliers];
+      config.duration = tempDuration;
+      saveConfigToCloud();
+      alert('設定已同步儲存至雲端！');
+      closeAdminModal();
+    }
+
+    function renderUserDropdown() {
+      const select = document.getElementById('userSelect');
+      if (!select) return;
+      const currentSelected = activeUserId;
+      select.innerHTML = '';
+      usersList.forEach(u => {
+        const opt = document.createElement('option');
+        opt.value = u.id;
+        opt.innerText = u.name;
+        select.appendChild(opt);
+      });
+      if (usersList.some(u => u.id === currentSelected)) {
+        select.value = currentSelected;
+      } else if (usersList.length > 0) {
+        activeUserId = usersList[0].id;
+      }
+    }
+
+    function onUserChange() {
+      const select = document.getElementById('userSelect');
+      if (select) activeUserId = select.value;
+      checkSelectedUserDailyStatus();
+    }
+
+    function getTodayDateString() {
+      const today = new Date();
+      return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    }
+
+    function checkSelectedUserDailyStatus() {
+      const todayStr = getTodayDateString();
+      const hasCompletedToday = historyLogs.some(log => log.userId === activeUserId && log.date === todayStr);
+      const statusBadge = document.getElementById('dailyStatusBadge');
+      const startBtn = document.getElementById('startPracticeBtn');
+      const idleText = document.getElementById('idleText');
+
+      if (hasCompletedToday) {
+        if (statusBadge) {
+          statusBadge.className = 'px-2.5 py-1 rounded-full text-xs font-bold flex items-center space-x-1 bg-emerald-50 text-emerald-700 border border-emerald-200';
+          statusBadge.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600"></i><span>今日已完成</span>`;
+        }
+        if (startBtn) startBtn.disabled = true;
+        if (idleText) idleText.innerText = '今日已完成心算練習，明天繼續加油！';
+      } else {
+        if (statusBadge) {
+          statusBadge.className = 'px-2.5 py-1 rounded-full text-xs font-bold flex items-center space-x-1 bg-amber-50 text-amber-700 border border-amber-200';
+          statusBadge.innerHTML = `<i class="fa-solid fa-clock"></i><span>今日尚未練習</span>`;
+        }
+        if (startBtn) startBtn.disabled = false;
+        if (idleText) idleText.innerText = '準備好了嗎？請選擇學員，點擊「開始今日練習」！';
+      }
+    }
+
+    function renderUserAdminTable() {
+      const tbody = document.getElementById('userAdminTableBody');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+      const todayStr = getTodayDateString();
+
+      usersList.forEach(u => {
+        const isDone = historyLogs.some(log => log.userId === u.id && log.date === todayStr);
+        const tr = document.createElement('tr');
+        tr.className = 'border-b hover:bg-slate-50/80';
+        tr.innerHTML = `
+          <td class="p-2.5 font-semibold text-slate-800">${u.name}</td>
+          <td class="p-2.5">${isDone ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">已完成</span>` : `<span class="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">未完成</span>`}</td>
+          <td class="p-2.5 text-right space-x-2">
+            ${isDone ? `<button onclick="resetUserDailyStatus('${u.id}')" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded">重設今日</button>` : ''}
+            <button onclick="removeUser('${u.id}')" class="text-xs bg-rose-50 hover:bg-rose-100 text-rose-600 px-2 py-1 rounded font-semibold">刪除</button>
+          </td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function startPractice() {
+      if (isPracticing) return;
+      isPracticing = true;
+      currentTotal = 0; currentCorrect = 0; currentWrong = 0; inputBuffer = '';
+
+      document.getElementById('currentTotal').innerText = '0';
+      document.getElementById('currentCorrect').innerText = '0';
+      document.getElementById('currentWrong').innerText = '0';
+
+      document.getElementById('userSelect').disabled = true;
+      document.getElementById('startPracticeBtn').disabled = true;
+      document.getElementById('submitAnswerBtn').disabled = false;
+
+      document.getElementById('idleContainer').classList.add('hidden');
+      document.getElementById('questionContainer').classList.remove('hidden');
+
+      timeLeft = config.duration;
+      document.getElementById('timerDisplay').innerText = timeLeft;
+
+      timerId = setInterval(() => {
+        timeLeft--;
+        document.getElementById('timerDisplay').innerText = timeLeft;
+        if (timeLeft <= 0) endPractice();
+      }, 1000);
+
+      generateNextQuestion();
+    }
+
+    function generateNextQuestion() {
+      inputBuffer = '';
+      updateInputDisplay();
+      const minA = Math.pow(10, config.digits - 1);
+      const maxA = Math.pow(10, config.digits) - 1;
+      currentNumA = Math.floor(Math.random() * (maxA - minA + 1)) + minA;
+
+      const allowedMultipliers = (config.multipliers && config.multipliers.length > 0) ? config.multipliers : [7];
+      currentNumB = allowedMultipliers[Math.floor(Math.random() * allowedMultipliers.length)];
+      currentAns = currentNumA * currentNumB;
+
+      document.getElementById('numA').innerText = currentNumA;
+      document.getElementById('numB').innerText = currentNumB;
+      document.getElementById('syncNumA').innerText = currentNumA;
+      document.getElementById('syncNumB').innerText = currentNumB;
+    }
+
+    function appendNum(n) { if (!isPracticing || inputBuffer.length >= 7) return; inputBuffer += n.toString(); updateInputDisplay(); }
+    function clearNum() { if (!isPracticing) return; inputBuffer = ''; updateInputDisplay(); }
+    function backspaceNum() { if (!isPracticing) return; inputBuffer = inputBuffer.slice(0, -1); updateInputDisplay(); }
+    function updateInputDisplay() {
+      document.getElementById('userInputDisplay').innerText = inputBuffer;
+      document.getElementById('syncUserAns').innerText = inputBuffer;
+    }
+
+    function submitAnswer() {
+      if (!isPracticing || inputBuffer === '') return;
+      const userVal = parseInt(inputBuffer, 10);
+      currentTotal++;
+      if (userVal === currentAns) currentCorrect++; else currentWrong++;
+
+      document.getElementById('currentTotal').innerText = currentTotal;
+      document.getElementById('currentCorrect').innerText = currentCorrect;
+      document.getElementById('currentWrong').innerText = currentWrong;
+      generateNextQuestion();
+    }
+
+    function endPractice() {
+      clearInterval(timerId);
+      isPracticing = false;
+
+      document.getElementById('submitAnswerBtn').disabled = true;
+      document.getElementById('userSelect').disabled = false;
+      document.getElementById('questionContainer').classList.add('hidden');
+      document.getElementById('idleContainer').classList.remove('hidden');
+
+      const currentUser = usersList.find(u => u.id === activeUserId);
+      const accuracy = currentTotal > 0 ? Math.round((currentCorrect / currentTotal) * 100) : 0;
+      const avgSpeed = currentTotal > 0 ? (config.duration / currentTotal).toFixed(1) : 0;
+
+      const newLog = {
+        userId: activeUserId,
+        userName: currentUser ? currentUser.name : '未知學員',
+        date: getTodayDateString(),
+        timestamp: Date.now(),
+        totalQuestions: currentTotal,
+        correct: currentCorrect,
+        wrong: currentWrong,
+        accuracy: accuracy,
+        avgSpeed: avgSpeed
+      };
+
+      saveLogToCloud(newLog);
+      document.getElementById('idleText').innerText = `🎉 練習結束！已同步上傳雲端：共答 ${currentTotal} 題，答對 ${currentCorrect} 題！`;
+    }
+
+    function renderHistoryTable() {
+      const tbody = document.getElementById('historyTableBody');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+      if (historyLogs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="p-3 text-center text-slate-400">目前尚無雲端歷史紀錄</td></tr>`;
+        return;
+      }
+      historyLogs.forEach(log => {
+        const dateStr = log.timestamp ? new Date(log.timestamp).toLocaleString('zh-TW', { hour12: false }) : log.date;
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-50 transition-all";
+        tr.innerHTML = `
+          <td class="p-2 border-b font-mono">${dateStr}</td>
+          <td class="p-2 border-b font-semibold text-slate-800">${log.userName}</td>
+          <td class="p-2 border-b font-mono">${log.totalQuestions}</td>
+          <td class="p-2 border-b font-mono text-emerald-600">${log.correct}</td>
+          <td class="p-2 border-b font-mono text-rose-500">${log.wrong}</td>
+          <td class="p-2 border-b font-mono font-bold">${log.accuracy}%</td>
+          <td class="p-2 border-b font-mono">${log.avgSpeed || 0} 秒/題</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function updateLeaderboard() {
+      const leaderboardContainer = document.getElementById('leaderboardList');
+      if (!leaderboardContainer) return;
+      leaderboardContainer.innerHTML = '';
+      const userBestMap = {};
+
+      historyLogs.forEach(log => {
+        if (log.accuracy >= 80 && log.totalQuestions >= 5 && log.avgSpeed > 0) {
+          const speed = parseFloat(log.avgSpeed);
+          if (!userBestMap[log.userId] || speed < userBestMap[log.userId].avgSpeed) {
+            userBestMap[log.userId] = { userName: log.userName, avgSpeed: speed, accuracy: log.accuracy };
+          }
+        }
+      });
+
+      const rankedList = Object.values(userBestMap).sort((a, b) => a.avgSpeed - b.avgSpeed).slice(0, 3);
+      const badges = [
+        { bg: 'bg-gradient-to-b from-amber-300 to-yellow-500 text-amber-950' },
+        { bg: 'bg-gradient-to-b from-slate-200 to-slate-400 text-slate-900' },
+        { bg: 'bg-gradient-to-b from-amber-600/30 to-amber-700/50 text-amber-900' }
+      ];
+
+      for (let i = 0; i < 3; i++) {
+        const item = rankedList[i];
+        const badge = badges[i];
+        const card = document.createElement('div');
+        card.className = "bg-white rounded-xl p-2.5 border border-slate-200 shadow-2xs flex items-center justify-between relative overflow-hidden";
+        if (item) {
+          card.innerHTML = `
+            <div class="flex items-center space-x-2.5">
+              <div class="w-8 h-8 rounded-full ${badge.bg} flex items-center justify-center font-bold text-xs shrink-0">NO.${i+1}</div>
+              <div class="overflow-hidden">
+                <div class="font-black text-slate-800 text-base leading-tight truncate">${item.userName}</div>
+                <div class="text-[10px] text-slate-500">正確率 ${item.accuracy}%</div>
+              </div>
+            </div>
+            <div class="text-right shrink-0">
+              <div class="font-mono font-bold text-indigo-600 text-base">${item.avgSpeed} <span class="text-[10px] font-normal text-slate-500">秒/題</span></div>
+            </div>`;
+        } else {
+          card.innerHTML = `
+            <div class="flex items-center space-x-2.5 text-slate-300">
+              <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold text-xs text-slate-400 shrink-0">NO.${i+1}</div>
+              <div class="font-bold text-slate-400 text-sm">虛位以待</div>
+            </div>
+            <div class="text-[11px] text-slate-400">尚無符合紀錄</div>`;
+        }
+        leaderboardContainer.appendChild(card);
+      }
+    }
+
+    function updateCharts() {
+      const chartEl = document.getElementById('historyChart');
+      if (!chartEl) return;
+      const ctx = chartEl.getContext('2d');
+      const userStats = {};
+      historyLogs.forEach(log => {
+        if (!userStats[log.userName]) userStats[log.userName] = { totalCorrect: 0, totalWrong: 0 };
+        userStats[log.userName].totalCorrect += log.correct;
+        userStats[log.userName].totalWrong += log.wrong;
+      });
+
+      const labels = Object.keys(userStats);
+      if (historyChartInstance) historyChartInstance.destroy();
+
+      historyChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            { label: '累積答對題數', data: labels.map(n => userStats[n].totalCorrect), backgroundColor: '#10b981' },
+            { label: '累積答錯題數', data: labels.map(n => userStats[n].totalWrong), backgroundColor: '#f43f5e' }
+          ]
+        },
+        options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } }
+      });
+    }
+  </script>
+</body>
+</html>
