@@ -92,7 +92,7 @@
         <div id="leaderboardList" class="flex flex-col gap-2.5"></div>
       </div>
       <div class="text-center pt-2 border-t border-amber-200/40">
-        <span class="text-[10px] text-slate-500 font-medium"><i class="fa-solid fa-circle-info mr-1"></i>標準：正確率 $\ge 80\%$ 且題目 $\ge 5$ 題</span>
+        <span class="text-[10px] text-slate-500 font-medium"><i class="fa-solid fa-circle-info mr-1"></i>標準：正確率 &ge; 80% 且題目 &ge; 5 題</span>
       </div>
     </div>
 
@@ -319,7 +319,7 @@
           <div class="overflow-x-auto border border-slate-200 rounded-lg max-h-48">
             <table class="w-full text-left text-xs text-slate-600">
               <thead class="bg-slate-50 text-slate-700 font-semibold sticky top-0">
-                <tr><th class="p-2 border-b">日期時間</th><th class="p-2 border-b">姓名</th><th class="p-2 border-b">總題數</th><th class="p-2 border-b">答對</th><th class="p-2 border-b">答錯</th><th class="p-2 border-b">正確率</th><th class="p-2 border-b">平均速度</th></tr>
+                <tr><th class="p-2 border-b">日期時間</th><th class="p-2 border-b">姓名</th><th class="p-2 border-b">總題數</th><th class="p-2 border-b">答對</th><th class="p-2 border-b">答錯</th><th class="p-2 border-b">正確率</th><th class="p-2 border-b">平均速度</th><th class="p-2 border-b text-right">刪除單筆</th></tr>
               </thead>
               <tbody id="historyTableBody"></tbody>
             </table>
@@ -365,6 +365,12 @@
     let currentCorrect = 0;
     let currentWrong = 0;
     let historyChartInstance = null;
+
+    // 輔助函式：統一轉換時間戳為「YYYY-MM-DD」當地日期字串
+    function getTodayDateString(ts) {
+      const d = ts ? new Date(ts) : new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
 
     // 當 Firebase 載入完成後啟動即時監聽
     window.addEventListener('firebase-ready', () => {
@@ -415,6 +421,7 @@
           historyLogs = [];
         }
         renderHistoryTable();
+        renderUserAdminTable();
         updateLeaderboard();
         updateCharts();
         checkSelectedUserDailyStatus();
@@ -445,13 +452,27 @@
       window.FB_set(newRef, newLog);
     }
 
+    // 重設/清除該學員「今日」所有的練習紀錄 (從雲端完整刪除)
     function resetUserDailyStatus(userId) {
       const todayStr = getTodayDateString();
-      historyLogs.forEach(log => {
-        if (log.userId === userId && log.date === todayStr) {
-          window.FB_remove(window.FB_ref(window.FB_DB, `history/${log.id}`));
-        }
+      const logsToDelete = historyLogs.filter(log => {
+        const logDateStr = getTodayDateString(log.timestamp);
+        return log.userId === userId && logDateStr === todayStr;
       });
+
+      if (logsToDelete.length === 0) return;
+
+      if (confirm(`確定要清除該學員今天的練習紀錄，重新開放練習嗎？`)) {
+        logsToDelete.forEach(log => {
+          window.FB_remove(window.FB_ref(window.FB_DB, `history/${log.id}`));
+        });
+      }
+    }
+
+    // 刪除單筆歷史紀錄
+    function removeHistoryLog(logId) {
+      if (!confirm('確定要刪除這筆歷史紀錄嗎？')) return;
+      window.FB_remove(window.FB_ref(window.FB_DB, `history/${logId}`));
     }
 
     // 後台密碼專用鍵盤函數
@@ -580,6 +601,7 @@
         select.value = currentSelected;
       } else if (usersList.length > 0) {
         activeUserId = usersList[0].id;
+        select.value = activeUserId;
       }
     }
 
@@ -589,14 +611,13 @@
       checkSelectedUserDailyStatus();
     }
 
-    function getTodayDateString() {
-      const today = new Date();
-      return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    }
-
     function checkSelectedUserDailyStatus() {
       const todayStr = getTodayDateString();
-      const hasCompletedToday = historyLogs.some(log => log.userId === activeUserId && log.date === todayStr);
+      const hasCompletedToday = historyLogs.some(log => {
+        const logDateStr = getTodayDateString(log.timestamp);
+        return log.userId === activeUserId && logDateStr === todayStr;
+      });
+
       const statusBadge = document.getElementById('dailyStatusBadge');
       const startBtn = document.getElementById('startPracticeBtn');
       const idleText = document.getElementById('idleText');
@@ -625,15 +646,19 @@
       const todayStr = getTodayDateString();
 
       usersList.forEach(u => {
-        const isDone = historyLogs.some(log => log.userId === u.id && log.date === todayStr);
+        const isDone = historyLogs.some(log => {
+          const logDateStr = getTodayDateString(log.timestamp);
+          return log.userId === u.id && logDateStr === todayStr;
+        });
+
         const tr = document.createElement('tr');
         tr.className = 'border-b hover:bg-slate-50/80';
         tr.innerHTML = `
           <td class="p-2.5 font-semibold text-slate-800">${u.name}</td>
           <td class="p-2.5">${isDone ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">已完成</span>` : `<span class="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">未完成</span>`}</td>
           <td class="p-2.5 text-right space-x-2">
-            ${isDone ? `<button onclick="resetUserDailyStatus('${u.id}')" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded">重設今日</button>` : ''}
-            <button onclick="removeUser('${u.id}')" class="text-xs bg-rose-50 hover:bg-rose-100 text-rose-600 px-2 py-1 rounded font-semibold">刪除</button>
+            ${isDone ? `<button onclick="resetUserDailyStatus('${u.id}')" class="text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-md font-bold transition">重設今日練習</button>` : ''}
+            <button onclick="removeUser('${u.id}')" class="text-xs bg-rose-50 hover:bg-rose-100 text-rose-600 px-2 py-1 rounded font-semibold">刪除學員</button>
           </td>`;
         tbody.appendChild(tr);
       });
@@ -717,11 +742,12 @@
       const accuracy = currentTotal > 0 ? Math.round((currentCorrect / currentTotal) * 100) : 0;
       const avgSpeed = currentTotal > 0 ? (config.duration / currentTotal).toFixed(1) : 0;
 
+      const now = Date.now();
       const newLog = {
         userId: activeUserId,
         userName: currentUser ? currentUser.name : '未知學員',
-        date: getTodayDateString(),
-        timestamp: Date.now(),
+        date: getTodayDateString(now),
+        timestamp: now,
         totalQuestions: currentTotal,
         correct: currentCorrect,
         wrong: currentWrong,
@@ -738,7 +764,7 @@
       if (!tbody) return;
       tbody.innerHTML = '';
       if (historyLogs.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" class="p-3 text-center text-slate-400">目前尚無雲端歷史紀錄</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="p-3 text-center text-slate-400">目前尚無雲端歷史紀錄</td></tr>`;
         return;
       }
       historyLogs.forEach(log => {
@@ -752,7 +778,8 @@
           <td class="p-2 border-b font-mono text-emerald-600">${log.correct}</td>
           <td class="p-2 border-b font-mono text-rose-500">${log.wrong}</td>
           <td class="p-2 border-b font-mono font-bold">${log.accuracy}%</td>
-          <td class="p-2 border-b font-mono">${log.avgSpeed || 0} 秒/題</td>`;
+          <td class="p-2 border-b font-mono">${log.avgSpeed || 0} 秒/題</td>
+          <td class="p-2 border-b text-right"><button onclick="removeHistoryLog('${log.id}')" class="text-[11px] bg-rose-50 hover:bg-rose-100 text-rose-600 px-2 py-0.5 rounded font-semibold">刪除</button></td>`;
         tbody.appendChild(tr);
       });
     }
