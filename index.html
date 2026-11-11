@@ -460,7 +460,10 @@
         return log.userId === userId && logDateStr === todayStr;
       });
 
-      if (logsToDelete.length === 0) return;
+      if (logsToDelete.length === 0) {
+        alert('該學員今日尚無練習紀錄可重設。');
+        return;
+      }
 
       if (confirm(`確定要清除該學員今天的練習紀錄，重新開放練習嗎？`)) {
         logsToDelete.forEach(log => {
@@ -657,7 +660,7 @@
           <td class="p-2.5 font-semibold text-slate-800">${u.name}</td>
           <td class="p-2.5">${isDone ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">已完成</span>` : `<span class="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">未完成</span>`}</td>
           <td class="p-2.5 text-right space-x-2">
-            ${isDone ? `<button onclick="resetUserDailyStatus('${u.id}')" class="text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-md font-bold transition">重設今日練習</button>` : ''}
+            <button onclick="resetUserDailyStatus('${u.id}')" class="text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-md font-bold transition">重設今日練習</button>
             <button onclick="removeUser('${u.id}')" class="text-xs bg-rose-50 hover:bg-rose-100 text-rose-600 px-2 py-1 rounded font-semibold">刪除學員</button>
           </td>`;
         tbody.appendChild(tr);
